@@ -1,25 +1,24 @@
--- Services
+-- Services & Cache
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
-local AutoFarmActive = false
+local AutoFarm = false
 
--- Config
-local TargetNames = {
+-- Target Chest Names Table
+local Targets = {
     ["normal_chest_spawn"] = true,
     ["medium_chest_spawn"] = true,
     ["big_chest_spawn"] = true,
     ["large_chest_spawn"] = true
 }
 
--- Cooldown tracking (stores timestamp when chest was last attempted)
-local cooldowns = {}
-
--- ScreenGui Setup
+-- ScreenGui Setup (Mobile Optimized)
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "MiniChestFarm"
+ScreenGui.Name = "ChestFarmMobile"
 ScreenGui.ResetOnSpawn = false
 
 if syn and syn.protect_gui then
@@ -31,261 +30,144 @@ else
     ScreenGui.Parent = CoreGui
 end
 
--- Compact Frame
+-- Compact Draggable Frame
 local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 110, 0, 40)
-Frame.Position = UDim2.new(0.5, -55, 0.1, 0)
-Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+Frame.Size = UDim2.new(0, 110, 0, 42)
+Frame.Position = UDim2.new(0.5, -55, 0.15, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
 Frame.BorderSizePixel = 0
 Frame.Active = true
 Frame.Draggable = true
 Frame.Parent = ScreenGui
 
 local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 6)
+UICorner.CornerRadius = UDim.new(0, 8)
 UICorner.Parent = Frame
 
 -- Toggle Button
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0.85, 0, 0.7, 0)
-ToggleButton.Position = UDim2.new(0.075, 0, 0.15, 0)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-ToggleButton.Text = "FARM: OFF"
-ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.Font = Enum.Font.SourceSansBold
-ToggleButton.TextSize = 12
-ToggleButton.Parent = Frame
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0.86, 0, 0.7, 0)
+ToggleBtn.Position = UDim2.new(0.07, 0, 0.15, 0)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+ToggleBtn.Text = "FARM: OFF"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.Font = Enum.Font.SourceSansBold
+ToggleBtn.TextSize = 13
+ToggleBtn.Parent = Frame
 
 local BtnCorner = Instance.new("UICorner")
-BtnCorner.CornerRadius = UDim.new(0, 4)
-BtnCorner.Parent = ToggleButton
+BtnCorner.CornerRadius = UDim.new(0, 6)
+BtnCorner.Parent = ToggleBtn
 
--- Helper Functions
+-- Core Character Helper
 local function GetRoot()
     local char = LocalPlayer.Character
     return char and char:FindFirstChild("HumanoidRootPart")
 end
 
-local function DirectInteract(target)
-    pcall(function()
-        for _, item in ipairs(target:GetDescendants()) do
-            if item:IsA("ProximityPrompt") and item.Enabled then
-                if fireproximityprompt then
-                    fireproximityprompt(item)
-                else
-                    item:InputHoldBegin()
-                    task.wait(0.1)
-                    item:InputHoldEnd()
-                end
-                task.wait(0.1)
-            elseif item:IsA("ClickDetector") then
-                if fireclickdetector then
-                    fireclickdetector(item)
-                else
-                    item:Click()
-                end
-                task.wait(0.1)
-            end
-        end
-    end)
+-- Position Sync Helper (Teleport + Server Position Force)
+local function MoveToTarget(targetCFrame)
+    local root = GetRoot()
+    if not root then return end
+    
+    local goalCFrame = targetCFrame + Vector3.new(0, 0.3, 0)
+    
+    -- Tween over 0.05s so the server registers physical movement and loads prompts
+    local tweenInfo = TweenInfo.new(0.05, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(root, tweenInfo, {CFrame = goalCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+    
+    root.CFrame = goalCFrame
 end
 
--- Toggle Event
-ToggleButton.MouseButton1Click:Connect(function()
-    AutoFarmActive = not AutoFarmActive
-    ToggleButton.Text = AutoFarmActive and "FARM: ON" or "FARM: OFF"
-    ToggleButton.BackgroundColor3 = AutoFarmActive and Color3.fromRGB(40, 150, 60) or Color3.fromRGB(150, 40, 40)
-end)
-
--- Main Loop
-task.spawn(function()
-    while true do
-        task.wait(0.2)
-        
-        if AutoFarmActive then
-            -- Fetch folder dynamically every pass to prevent dead folder references
-            local chestFolder = Workspace:FindFirstChild("world_chests")
-            local root = GetRoot()
-            local now = tick()
-
-            if chestFolder and root then
-                local children = chestFolder:GetChildren()
-                
-                for i = 1, #children do
-                    if not AutoFarmActive then break end
-                    
-                    local child = children[i]
-                    
-                    -- Check if valid target and not on a temporary 3-second cooldown
-                    if child and child.Parent and TargetNames[child.Name] then
-                        local lastAttempt = cooldowns[child] or 0
-                        
-                        if (now - lastAttempt) > 3 then -- 3 second retry window per chest
-                            local cframe = nil
-                            pcall(function()
-                                if child:IsA("BasePart") then
-                                    cframe = child.CFrame
-                                elseif child:IsA("Model") and child.PrimaryPart then
-                                    cframe = child.PrimaryPart.CFrame
-                                elseif child:FindFirstChildWhichIsA("BasePart") then
-                                    cframe = child:FindFirstChildWhichIsA("BasePart").CFrame
-                                end
-                            end)
-
-                            if cframe and root and root.Parent then
-                                cooldowns[child] = tick() -- Mark attempt timestamp
-                                root.CFrame = cframe + Vector3.new(0, 0.3, 0)
-                                task.wait(0.15)
-                                
-                                DirectInteract(child)
-                                task.wait(0.15)
-                            end
-                        end
-                    end
+-- Universal Interaction Function
+local function MultiInteract(targetInstance)
+    -- 1. Try Direct ProximityPrompts & ClickDetectors
+    local interacted = false
+    for _, desc in ipairs(targetInstance:GetDescendants()) do
+        if desc:IsA("ProximityPrompt") and desc.Enabled then
+            for i = 1, 3 do
+                if fireproximityprompt then
+                    fireproximityprompt(desc)
+                else
+                    desc:InputHoldBegin()
+                    task.wait(0.1)
+                    desc:InputHoldEnd()
                 end
+                task.wait(0.1)
             end
+            interacted = true
+        elseif desc:IsA("ClickDetector") then
+            for i = 1, 3 do
+                if fireclickdetector then
+                    fireclickdetector(desc)
+                else
+                    desc:Click()
+                end
+                task.wait(0.1)
+            end
+            interacted = true
         end
     end
-end)-- Services & Local Cache
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local CoreGui = game:GetService("CoreGui")
 
-local LocalPlayer = Players.LocalPlayer
-local AutoFarmActive = false
-
--- Config & Cache
-local ChestFolder = Workspace:WaitForChild("world_chests", 5)
-local TargetNames = {
-    ["normal_chest_spawn"] = true,
-    ["medium_chest_spawn"] = true,
-    ["big_chest_spawn"] = true,
-    ["large_chest_spawn"] = true
-}
-
--- Compact Mobile ScreenGui
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "MiniChestFarm"
-ScreenGui.ResetOnSpawn = false
-
-if syn and syn.protect_gui then
-    syn.protect_gui(ScreenGui)
-    ScreenGui.Parent = CoreGui
-elseif gethui then
-    ScreenGui.Parent = gethui()
-else
-    ScreenGui.Parent = CoreGui
-end
-
--- Compact Frame
-local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 100, 0, 40)
-Frame.Position = UDim2.new(0.5, -50, 0.1, 0)
-Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-Frame.BorderSizePixel = 0
-Frame.Active = true
-Frame.Draggable = true
-Frame.Parent = ScreenGui
-
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 6)
-UICorner.Parent = Frame
-
--- Toggle Button
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0.85, 0, 0.7, 0)
-ToggleButton.Position = UDim2.new(0.075, 0, 0.15, 0)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-ToggleButton.Text = "FARM: OFF"
-ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.Font = Enum.Font.SourceSansBold
-ToggleButton.TextSize = 12
-ToggleButton.Parent = Frame
-
-local BtnCorner = Instance.new("UICorner")
-BtnCorner.CornerRadius = UDim.new(0, 4)
-BtnCorner.Parent = ToggleButton
-
--- Helper Functions
-local function GetRoot()
-    local char = LocalPlayer.Character
-    return char and char:FindFirstChild("HumanoidRootPart")
-end
-
-local function DirectInteract(target)
-    pcall(function()
-        for _, item in ipairs(target:GetDescendants()) do
-            if item:IsA("ProximityPrompt") and item.Enabled then
-                if fireproximityprompt then
-                    fireproximityprompt(item)
-                else
-                    item:InputHoldBegin()
-                    task.wait(0.1)
-                    item:InputHoldEnd()
-                end
-                task.wait(0.1)
-            elseif item:IsA("ClickDetector") then
-                if fireclickdetector then
-                    fireclickdetector(item)
-                else
-                    item:Click()
-                end
-                task.wait(0.1)
-            end
+    -- 2. Fallback Screen Tap (3 rapid taps at 0.1s holding interval)
+    if not interacted then
+        local viewport = Workspace.CurrentCamera.ViewportSize
+        local cx, cy = viewport.X / 2, viewport.Y / 2
+        
+        for i = 1, 3 do
+            VirtualInputManager:SendTouchEvent(1, Enum.UserInputState.Begin, cx, cy)
+            task.wait(0.1)
+            VirtualInputManager:SendTouchEvent(1, Enum.UserInputState.End, cx, cy)
+            task.wait(0.1)
         end
-    end)
+    end
 end
 
--- Toggle Event
-ToggleButton.MouseButton1Click:Connect(function()
-    AutoFarmActive = not AutoFarmActive
-    ToggleButton.Text = AutoFarmActive and "FARM: ON" or "FARM: OFF"
-    ToggleButton.BackgroundColor3 = AutoFarmActive and Color3.fromRGB(40, 150, 60) or Color3.fromRGB(150, 40, 40)
+-- Button Toggle Event
+ToggleBtn.MouseButton1Click:Connect(function()
+    AutoFarm = not AutoFarm
+    ToggleBtn.Text = AutoFarm and "FARM: ON" or "FARM: OFF"
+    ToggleBtn.BackgroundColor3 = AutoFarm and Color3.fromRGB(40, 160, 70) or Color3.fromRGB(180, 50, 50)
 end)
 
--- Main Loop with Instance Tracking
+-- Main Execution Loop
 task.spawn(function()
-    local processedChests = {} -- Tracks recently interacted instances
-
     while true do
-        task.wait(0.2)
+        task.wait(0.15)
         
-        if AutoFarmActive and ChestFolder then
-            local root = GetRoot()
-            if root then
-                local children = ChestFolder:GetChildren()
+        if AutoFarm then
+            local folder = Workspace:FindFirstChild("world_chests")
+            if folder then
+                local chests = folder:GetChildren()
                 
-                for i = 1, #children do
-                    if not AutoFarmActive then break end
+                for i = 1, #chests do
+                    if not AutoFarm then break end
                     
-                    local child = children[i]
-                    -- Check both the name match AND if this specific instance was processed this cycle
-                    if child and child.Parent and TargetNames[child.Name] and not processedChests[child] then
+                    local chest = chests[i]
+                    if chest and chest.Parent and Targets[chest.Name] then
                         
-                        local cframe = nil
-                        pcall(function()
-                            if child:IsA("BasePart") then
-                                cframe = child.CFrame
-                            elseif child:IsA("Model") and child.PrimaryPart then
-                                cframe = child.PrimaryPart.CFrame
-                            elseif child:FindFirstChildWhichIsA("BasePart") then
-                                cframe = child:FindFirstChildWhichIsA("BasePart").CFrame
-                            end
-                        end)
+                        -- Find Target CFrame safely
+                        local targetCFrame = nil
+                        if chest:IsA("BasePart") then
+                            targetCFrame = chest.CFrame
+                        elseif chest:IsA("Model") and chest.PrimaryPart then
+                            targetCFrame = chest.PrimaryPart.CFrame
+                        elseif chest:FindFirstChildWhichIsA("BasePart") then
+                            targetCFrame = chest:FindFirstChildWhichIsA("BasePart").CFrame
+                        end
 
-                        if cframe and root and root.Parent then
-                            root.CFrame = cframe + Vector3.new(0, 0.3, 0)
-                            task.wait(0.15)
+                        if targetCFrame then
+                            -- Move & trigger interaction
+                            MoveToTarget(targetCFrame)
+                            task.wait(0.05)
                             
-                            DirectInteract(child)
-                            processedChests[child] = true -- Mark this exact instance as done
-                            task.wait(0.15)
+                            MultiInteract(chest)
+                            task.wait(0.1)
                         end
                     end
                 end
-                
-                -- Clear tracking list after sweeping all current chests in the folder
-                table.clear(processedChests)
             end
         end
     end
