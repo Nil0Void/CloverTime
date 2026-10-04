@@ -24,6 +24,397 @@ local Targets = {
     ["large_chest_spawn"] = true
 }
 
+-- Target Selected Chest Models
+local SelectedChestNames = {
+    ["selected_normal_chest"] = true,
+    ["selected_medium_chest"] = true,
+    ["selected_big_chest"] = true,
+    ["selected_large_chest"] = true,
+    ["selected_largel_chest"] = true
+}
+
+-- Cleanup Old GUIs
+local function CleanupOldGUIs(parent)
+    if parent then
+        for _, child in ipairs(parent:GetChildren()) do
+            if child.Name == "FastChestFarm" then
+                child:Destroy()
+            end
+        end
+    end
+end
+
+CleanupOldGUIs(CoreGui)
+if gethui then
+    CleanupOldGUIs(gethui())
+end
+
+-- ScreenGui Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "FastChestFarm"
+ScreenGui.ResetOnSpawn = false
+
+if syn and syn.protect_gui then
+    syn.protect_gui(ScreenGui)
+    ScreenGui.Parent = CoreGui
+elseif gethui then
+    ScreenGui.Parent = gethui()
+else
+    ScreenGui.Parent = CoreGui
+end
+
+-- Single Master Frame
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 170, 0, 70)
+Frame.Position = UDim2.new(0.5, -85, 0.15, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+Frame.BorderSizePixel = 0
+Frame.Active = true
+Frame.Draggable = true
+Frame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = Frame
+
+-- Toggle Button
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0.9, 0, 0.4, 0)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.08, 0)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+ToggleBtn.Text = "FARM: OFF"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.Font = Enum.Font.SourceSansBold
+ToggleBtn.TextSize = 13
+ToggleBtn.Parent = Frame
+
+local BtnCorner = Instance.new("UICorner")
+BtnCorner.CornerRadius = UDim.new(0, 6)
+BtnCorner.Parent = ToggleBtn
+
+-- Target & Hop Status Display
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(0.9, 0, 0.45, 0)
+StatusLabel.Position = UDim2.new(0.05, 0, 0.52, 0)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "Status: Idle"
+StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+StatusLabel.Font = Enum.Font.SourceSans
+StatusLabel.TextSize = 10
+StatusLabel.TextScaled = true
+StatusLabel.Parent = Frame
+
+-- Server Hop Function
+local function ServerHop()
+    StatusLabel.Text = "Status: Hopping Server..."
+    local placeId = game.PlaceId
+    local servers = {}
+    
+    pcall(function()
+        local req = request or http_request or (syn and syn.request)
+        if req then
+            local res = req({
+                Url = string.format("https://games.roblox.com/v1/games/%d/servers/0?sortOrder=Asc&limit=100", placeId),
+                Method = "GET"
+            })
+            if res and res.Body then
+                local body = HttpService:JSONDecode(res.Body)
+                if body and body.data then
+                    for _, v in ipairs(body.data) do
+                        if v.playing and v.maxPlayers and v.playing < v.maxPlayers and v.id ~= game.JobId then
+                            table.insert(servers, v.id)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    if #servers > 0 then
+        TeleportService:TeleportToPlaceInstance(placeId, servers[math.random(1, #servers)], LocalPlayer)
+    else
+        TeleportService:Teleport(placeId, LocalPlayer)
+    end
+end
+
+-- Active NoClip Function
+local function ToggleNoclip(state)
+    if state then
+        if not NoclipConnection then
+            NoclipConnection = RunService.Stepped:Connect(function()
+                local char = LocalPlayer.Character
+                if char then
+                    for _, v in ipairs(char:GetDescendants()) do
+                        if v:IsA("BasePart") then
+                            v.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        end
+    else
+        if NoclipConnection then
+            NoclipConnection:Disconnect()
+            NoclipConnection = nil
+        end
+    end
+end
+
+-- Helper to safely get nil instances
+local function GetNilInstance(name, className)
+    if getnilinstances then
+        for _, v in next, getnilinstances() do
+            if v.ClassName == className and v.Name == name then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+-- Safely Get CFrame
+local function GetChestCFrame(chest)
+    if chest:IsA("BasePart") then
+        return chest.CFrame
+    elseif chest:IsA("Model") then
+        return chest:GetPivot()
+    end
+    return nil
+end
+
+-- Teleport 7 Studs Underground
+local function FastTeleport(targetCFrame)
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local goalCFrame = targetCFrame * CFrame.new(0, -7, 0)
+    
+    char:PivotTo(goalCFrame)
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+end
+
+-- Optimized Fast Interaction Logic
+local function FastInteract(chest)
+    local found = false
+    
+    for _, desc in ipairs(chest:GetDescendants()) do
+        if desc:IsA("ProximityPrompt") and desc.Enabled then
+            found = true
+            for i = 1, 3 do
+                if fireproximityprompt then
+                    fireproximityprompt(desc)
+                else
+                    desc:InputHoldBegin()
+                    task.wait(0.05)
+                    desc:InputHoldEnd()
+                end
+            end
+        elseif desc:IsA("ClickDetector") then
+            found = true
+            for i = 1, 3 do
+                if fireclickdetector then
+                    fireclickdetector(desc)
+                else
+                    desc:Click()
+                end
+            end
+        end
+    end
+
+    if not found then
+        local viewport = Workspace.CurrentCamera.ViewportSize
+        local cx, cy = viewport.X / 2, viewport.Y / 2
+        for i = 1, 3 do
+            VirtualInputManager:SendTouchEvent(1, Enum.UserInputState.Begin, cx, cy)
+            task.wait(0.05)
+            VirtualInputManager:SendTouchEvent(1, Enum.UserInputState.End, cx, cy)
+        end
+    end
+end
+
+-- Loop 1: CHESTS_BLINK_RELIABLE_REMOTE (Every 0.15s)
+task.spawn(function()
+    while true do
+        if AutoFarm then
+            pcall(function()
+                local remote = ReplicatedStorage:FindFirstChild("CHESTS_BLINK_RELIABLE_REMOTE")
+                if remote then
+                    local args = { buffer.fromstring("\000\001"), {} }
+                    remote:FireServer(unpack(args))
+                end
+            end)
+        end
+        task.wait(0.15)
+    end
+end)
+
+-- Loop 2: BLINK_RELIABLE_REMOTE with BOTH Equip Strings (Every 0.15s)
+task.spawn(function()
+    while true do
+        if AutoFarm then
+            pcall(function()
+                local remote = ReplicatedStorage:FindFirstChild("BLINK_RELIABLE_REMOTE")
+                if remote then
+                    -- Equip String 1
+                    local args1 = {
+                        buffer.fromstring("\014\031\000\005\000fkOGC-f-zNE-R9fzfgN-YD-Cw-TvnD1equip"),
+                        {}
+                    }
+                    remote:FireServer(unpack(args1))
+                    
+                    -- Equip String 2
+                    local args2 = {
+                        buffer.fromstring("\014\031\000\005\00051JG1-h-1uc-PNXvFGW-Kb-6j-KV6uWequip"),
+                        {}
+                    }
+                    remote:FireServer(unpack(args2))
+                end
+            end)
+        end
+        task.wait(0.15)
+    end
+end)
+
+-- Loop 3: Auto-Equip Selected Chest Models from Nil and Workspace (Every 0.15s)
+task.spawn(function()
+    while true do
+        if AutoFarm then
+            pcall(function()
+                local char = LocalPlayer.Character
+                local aiPlayer = Workspace:FindFirstChild("characters") and Workspace.characters:FindFirstChild("AiPlayer_205")
+
+                for chestName, _ in pairs(SelectedChestNames) do
+                    -- 1. Search in nil instances
+                    local nilChest = GetNilInstance(chestName, "Model")
+                    if nilChest and char then
+                        nilChest.Parent = char
+                    end
+
+                    -- 2. Search in AiPlayer_205
+                    if aiPlayer then
+                        local aiChest = aiPlayer:FindFirstChild(chestName)
+                        if aiChest and char then
+                            aiChest.Parent = char
+                        end
+                    end
+                end
+            end)
+        end
+        task.wait(0.15)
+    end
+end)
+
+-- Button Toggle Event
+ToggleBtn.MouseButton1Click:Connect(function()
+    AutoFarm = not AutoFarm
+    ToggleBtn.Text = AutoFarm and "FARM: ON" or "FARM: OFF"
+    ToggleBtn.BackgroundColor3 = AutoFarm and Color3.fromRGB(40, 160, 70) or Color3.fromRGB(180, 50, 50)
+    
+    ToggleNoclip(AutoFarm)
+    LastChestTime = tick()
+    
+    if not AutoFarm then
+        StatusLabel.Text = "Status: Idle"
+        local char = LocalPlayer.Character
+        if char then
+            for _, v in ipairs(char:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    v.CanCollide = true
+                end
+            end
+        end
+    end
+end)
+
+-- Main Farming Loop
+task.spawn(function()
+    local lastUndergroundCFrame = nil
+
+    while true do
+        task.wait()
+        
+        if AutoFarm then
+            pcall(function()
+                local folder = Workspace:FindFirstChild("world_chests")
+                local foundChest = false
+
+                if folder then
+                    local children = folder:GetChildren()
+                    
+                    for i = 1, #children do
+                        if not AutoFarm then break end
+                        
+                        local chest = children[i]
+                        if chest and chest.Parent and Targets[chest.Name] then
+                            local cframe = GetChestCFrame(chest)
+                            
+                            if cframe then
+                                foundChest = true
+                                LastChestTime = tick()
+                                StatusLabel.Text = "Target: " .. chest.Name
+                                lastUndergroundCFrame = cframe * CFrame.new(0, -7, 0)
+                                FastTeleport(cframe)
+                                FastInteract(chest)
+                            end
+                        end
+                    end
+                else
+                    StatusLabel.Text = "Status: 'world_chests' missing"
+                end
+
+                -- Check 3-Minute Server Hop Timeout
+                local idleTime = math.floor(tick() - LastChestTime)
+                if idleTime >= SERVER_HOP_TIMEOUT then
+                    ServerHop()
+                    task.wait(5)
+                end
+
+                -- Hold 7 studs underground if waiting for chests
+                if not foundChest and lastUndergroundCFrame then
+                    local remaining = SERVER_HOP_TIMEOUT - idleTime
+                    StatusLabel.Text = string.format("Underground (Hop in %ds)", math.max(0, remaining))
+                    local char = LocalPlayer.Character
+                    if char and char:FindFirstChild("HumanoidRootPart") then
+                        char:PivotTo(lastUndergroundCFrame)
+                        char.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
+                    end
+                elseif not foundChest and not lastUndergroundCFrame then
+                    local remaining = SERVER_HOP_TIMEOUT - idleTime
+                    StatusLabel.Text = string.format("Searching (Hop in %ds)", math.max(0, remaining))
+                end
+            end)
+        end
+    end
+end)-- Services & Cache
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local AutoFarm = false
+local NoclipConnection = nil
+
+-- Server Hop Variables
+local LastChestTime = tick()
+local SERVER_HOP_TIMEOUT = 180 -- 3 minutes in seconds
+
+-- Target Chest Names
+local Targets = {
+    ["normal_chest_spawn"] = true,
+    ["medium_chest_spawn"] = true,
+    ["big_chest_spawn"] = true,
+    ["large_chest_spawn"] = true
+}
+
 -- Cleanup Old GUIs
 local function CleanupOldGUIs(parent)
     if parent then
