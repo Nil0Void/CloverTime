@@ -1,14 +1,13 @@
 -- Services & Cache
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local TweenService = game:GetService("TweenService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local AutoFarm = false
 
--- Target Chest Names Table
+-- Target Names
 local Targets = {
     ["normal_chest_spawn"] = true,
     ["medium_chest_spawn"] = true,
@@ -16,7 +15,7 @@ local Targets = {
     ["large_chest_spawn"] = true
 }
 
--- ScreenGui Setup (Mobile Optimized)
+-- ScreenGui Setup
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "ChestFarmMobile"
 ScreenGui.ResetOnSpawn = false
@@ -65,28 +64,31 @@ local function GetRoot()
     return char and char:FindFirstChild("HumanoidRootPart")
 end
 
--- Position Sync Helper (Teleport + Server Position Force)
-local function MoveToTarget(targetCFrame)
-    local root = GetRoot()
-    if not root then return end
-    
-    local goalCFrame = targetCFrame + Vector3.new(0, 0.3, 0)
-    
-    -- Tween over 0.05s so the server registers physical movement and loads prompts
-    local tweenInfo = TweenInfo.new(0.05, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(root, tweenInfo, {CFrame = goalCFrame})
-    tween:Play()
-    tween.Completed:Wait()
-    
-    root.CFrame = goalCFrame
+-- Safely find physical CFrame inside animated models
+local function GetChestCFrame(chest)
+    if chest:IsA("BasePart") then
+        return chest.CFrame
+    elseif chest:IsA("Model") then
+        if chest.PrimaryPart then
+            return chest.PrimaryPart.CFrame
+        end
+        -- Fallback: Find first BasePart inside the animated model
+        local part = chest:FindFirstChildWhichIsA("BasePart", true)
+        if part then
+            return part.CFrame
+        end
+    end
+    return nil
 end
 
--- Universal Interaction Function
-local function MultiInteract(targetInstance)
-    -- 1. Try Direct ProximityPrompts & ClickDetectors
-    local interacted = false
-    for _, desc in ipairs(targetInstance:GetDescendants()) do
+-- Execute Interactions
+local function Interact(chest)
+    local foundPrompt = false
+    
+    -- Check for Prompts/Clickers
+    for _, desc in ipairs(chest:GetDescendants()) do
         if desc:IsA("ProximityPrompt") and desc.Enabled then
+            foundPrompt = true
             for i = 1, 3 do
                 if fireproximityprompt then
                     fireproximityprompt(desc)
@@ -97,8 +99,8 @@ local function MultiInteract(targetInstance)
                 end
                 task.wait(0.1)
             end
-            interacted = true
         elseif desc:IsA("ClickDetector") then
+            foundPrompt = true
             for i = 1, 3 do
                 if fireclickdetector then
                     fireclickdetector(desc)
@@ -107,15 +109,13 @@ local function MultiInteract(targetInstance)
                 end
                 task.wait(0.1)
             end
-            interacted = true
         end
     end
 
-    -- 2. Fallback Screen Tap (3 rapid taps at 0.1s holding interval)
-    if not interacted then
+    -- Fallback: Screen Taps
+    if not foundPrompt then
         local viewport = Workspace.CurrentCamera.ViewportSize
         local cx, cy = viewport.X / 2, viewport.Y / 2
-        
         for i = 1, 3 do
             VirtualInputManager:SendTouchEvent(1, Enum.UserInputState.Begin, cx, cy)
             task.wait(0.1)
@@ -125,50 +125,45 @@ local function MultiInteract(targetInstance)
     end
 end
 
--- Button Toggle Event
+-- Toggle Event
 ToggleBtn.MouseButton1Click:Connect(function()
     AutoFarm = not AutoFarm
     ToggleBtn.Text = AutoFarm and "FARM: ON" or "FARM: OFF"
     ToggleBtn.BackgroundColor3 = AutoFarm and Color3.fromRGB(40, 160, 70) or Color3.fromRGB(180, 50, 50)
 end)
 
--- Main Execution Loop
+-- Crash-Proof Main Loop
 task.spawn(function()
     while true do
-        task.wait(0.15)
+        task.wait(0.1)
         
         if AutoFarm then
-            local folder = Workspace:FindFirstChild("world_chests")
-            if folder then
-                local chests = folder:GetChildren()
+            pcall(function()
+                local folder = Workspace:FindFirstChild("world_chests")
+                local root = GetRoot()
                 
-                for i = 1, #chests do
-                    if not AutoFarm then break end
+                if folder and root then
+                    local chests = folder:GetChildren()
                     
-                    local chest = chests[i]
-                    if chest and chest.Parent and Targets[chest.Name] then
+                    for i = 1, #chests do
+                        if not AutoFarm then break end
                         
-                        -- Find Target CFrame safely
-                        local targetCFrame = nil
-                        if chest:IsA("BasePart") then
-                            targetCFrame = chest.CFrame
-                        elseif chest:IsA("Model") and chest.PrimaryPart then
-                            targetCFrame = chest.PrimaryPart.CFrame
-                        elseif chest:FindFirstChildWhichIsA("BasePart") then
-                            targetCFrame = chest:FindFirstChildWhichIsA("BasePart").CFrame
-                        end
-
-                        if targetCFrame then
-                            -- Move & trigger interaction
-                            MoveToTarget(targetCFrame)
-                            task.wait(0.05)
+                        local chest = chests[i]
+                        if chest and chest.Parent and Targets[chest.Name] then
+                            local cframe = GetChestCFrame(chest)
                             
-                            MultiInteract(chest)
-                            task.wait(0.1)
+                            if cframe then
+                                -- Instant TP 0.3 units above the model's part
+                                root.CFrame = cframe + Vector3.new(0, 0.3, 0)
+                                task.wait(0.1)
+                                
+                                Interact(chest)
+                                task.wait(0.1)
+                            end
                         end
                     end
                 end
-            end
+            end)
         end
     end
 end)
