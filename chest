@@ -72,17 +72,17 @@ local function DirectInteract(target)
                     fireproximityprompt(item)
                 else
                     item:InputHoldBegin()
-                    task.wait(0.1) -- 0.1s Hold Duration
+                    task.wait(0.1)
                     item:InputHoldEnd()
                 end
-                task.wait(0.2) -- 0.2s delay between triggers
+                task.wait(0.1)
             elseif item:IsA("ClickDetector") then
                 if fireclickdetector then
                     fireclickdetector(item)
                 else
                     item:Click()
                 end
-                task.wait(0.2) -- 0.2s delay between clicks
+                task.wait(0.1)
             end
         end
     end)
@@ -95,8 +95,10 @@ ToggleButton.MouseButton1Click:Connect(function()
     ToggleButton.BackgroundColor3 = AutoFarmActive and Color3.fromRGB(40, 150, 60) or Color3.fromRGB(150, 40, 40)
 end)
 
--- Main Loop
+-- Main Loop with Instance Tracking
 task.spawn(function()
+    local processedChests = {} -- Tracks recently interacted instances
+
     while true do
         task.wait(0.2)
         
@@ -109,8 +111,9 @@ task.spawn(function()
                     if not AutoFarmActive then break end
                     
                     local child = children[i]
-                    if child and child.Parent and TargetNames[child.Name] then
-                        -- Get target position safely
+                    -- Check both the name match AND if this specific instance was processed this cycle
+                    if child and child.Parent and TargetNames[child.Name] and not processedChests[child] then
+                        
                         local cframe = nil
                         pcall(function()
                             if child:IsA("BasePart") then
@@ -122,16 +125,19 @@ task.spawn(function()
                             end
                         end)
 
-                        -- Teleport and interact if target still exists
                         if cframe and root and root.Parent then
                             root.CFrame = cframe + Vector3.new(0, 0.3, 0)
-                            task.wait(0.2) -- 0.2s positioning delay
+                            task.wait(0.15)
                             
                             DirectInteract(child)
-                            task.wait(0.2) -- 0.2s cooldown before next chest
+                            processedChests[child] = true -- Mark this exact instance as done
+                            task.wait(0.15)
                         end
                     end
                 end
+                
+                -- Clear tracking list after sweeping all current chests in the folder
+                table.clear(processedChests)
             end
         end
     end
